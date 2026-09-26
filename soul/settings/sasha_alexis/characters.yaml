@@ -1,0 +1,7 @@
+# Which character this setting generates (`self`) and whose real messages
+# come in (`other`). Values are folder names under characters/.
+# Authored, not runtime — /switch and switch-setting.sh read this to fill in
+# soul/config.yaml's `characters:` block, so the pairing travels with the
+# setting instead of being carried over from whatever was active before.
+self: alexis
+other: sasha

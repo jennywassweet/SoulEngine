@@ -1,0 +1,142 @@
+# Soul Configuration
+
+# Active setting — a fully self-contained pairing. Everything about it lives
+# under soul/settings/<value>/: characters, relationship and prompt overrides
+# at the top, everything generated (chat log, continuity, memory, photos) in
+# its runtime/ subdirectory. Switching settings never mixes content.
+setting: sasha_alexis
+
+# Which characters within the active setting are active. `self` is the one
+# the model writes, `other` is the one whose real messages come in. Values
+# map to soul/settings/<setting>/characters/<value>/, display name is the
+# capitalized value.
+characters:
+  self: alexis
+  other: sasha
+
+# LLM Provider settings
+# provider: mistral | openrouter
+llm:
+  provider: openrouter
+  model: google/gemini-3.8-flash
+  temperature: 0.85
+  # luna felt too weak/"mini" to the user; luna-pro (same price tier)
+  # and terra (10x price, ~sonnet-tier) both tested well in isolation but
+  # rejected on price. claude-sonnet-5 (same price as terra) wrote the
+  # best single sample of the whole session but rejected on voice fit —
+  # user's call: "sonnet is always sonnet... a wounded bird, smart and
+  # precise" — Claude's own restraint bleeds through regardless of
+  # character, wrong fit for a raw/impulsive circus-kid voice.
+  # gemini-3.6-flash was ruled fully incompatible earlier (see
+  # gemini_moderation_incompatible memory — structural PROHIBITED_CONTENT
+  # block, non-deterministic, worsened as context grew). Trying 3.8:
+  # 3/3 clean in isolated replay on the current (short) manuscript, fast
+  # (2.7-6s), good writing — but that is NOT evidence the underlying
+  # safety-filter architecture changed; the 3.6 block was intermittent
+  # and got worse specifically as the conversation got longer. Watch for
+  # it to resurface later, don't take early clean runs as a fix.
+  max_tokens: 2000
+  reasoning_effort: minimal
+  # Provider pinning is supported (provider_routing: {order: [...],
+  # allow_fallbacks: false}) but left off for now — testing z-ai/glm-4.7
+  # itself first, unpinned, before layering a provider preference on top.
+
+# Prompt assembly
+prompt:
+  main_prompt_file: config/main_prompt.md
+  budget:
+    # Invariant to keep: the manuscript's share (total_chars minus the fixed
+    # blocks minus reserved_for_response) must stay larger than
+    # compression.trigger_chars. Otherwise messages that no longer fit the
+    # manuscript but haven't been compressed yet are in neither the
+    # manuscript nor retrieval (exclude_ids treats them as still live) —
+    # orchestrator.py logs a warning when that happens. At 40000 the
+    # manuscript gets ~22k chars against a 16k trigger.
+    total_chars: 40000
+    reserved_for_response: 4000
+
+# Compression settings
+compression:
+  trigger_chars: 16000           # threshold for total_chars_since_last_compression
+
+  chunk_size_messages: 30        # how many messages to compress at once
+
+  summary_max_words: 200         # limit for one summary in WORDS
+  continuity_max_words: 570      # limit for continuity.md in WORDS
+
+  prompt_file: config/compression_prompt.md
+
+# Photo mode — a fully separate engine, not
+# part of the text circuit above: it never reads/writes chat_log.jsonl,
+# memory, or continuity beyond a read-only glance. Shared defaults here;
+# each setting opts in via soul/settings/<setting>/images.yaml, which
+# declares which modes (shot/scene/selfie) are open and may override model/
+# llm.* individually. No images.yaml in a setting = photos are off there,
+# regardless of `enabled` below.
+images:
+  enabled: true                        # global switch (money) — "don't spend", not "inappropriate here"
+  provider: openrouter
+  # Chosen 2026-09-14 by probing candidates (scripts/probe_image_models.py):
+  # slower and dearer than the alternatives (52-112s vs 4-8s, $0.06 vs
+  # $0.03-0.04), but no moderation refusal on any probe prompt, and the only
+  # candidate that didn't draw a phone into frame on a selfie-angle prompt.
+  model: x-ai/grok-imagine-image-2.0
+  prompt_file: config/photo_prompt.md
+  max_chars: 12000                     # manuscript-tail budget for the describer
+  # How many reference images the image model accepts (a character's
+  # face.png, for a consistent likeness).
+  # This is a property of the model, published per model at
+  # /api/v1/images/models: grok-imagine-image-2.0 takes 3, some models
+  # in that catalog take none at all. Check there when changing `model`
+  # above rather than assuming. Only one is sent today (the face), so
+  # this is a ceiling, not a target - each one costs $0.01 extra.
+  max_references: 3
+  llm:                                 # text model that decides availability + writes the image prompt
+    provider: openrouter
+    model: google/gemini-3.8-flash
+    temperature: 0.8
+    # Verified live 2026-09-14: without this, gemini-3.8-flash spends most
+    # of max_tokens on hidden reasoning before emitting the JSON and the
+    # response comes back truncated more often than not. Same fix the main
+    # llm block above already applies to this same model.
+    reasoning_effort: minimal
+    max_tokens: 800
+
+# Retrieval memory (embeds every message, injects top-K semantically close
+# fragments alongside continuity.md). Implemented in engine/retriever.py +
+# engine/memory_store.py, wired into Orchestrator. Several values below
+# were retuned against
+# real history and carry their measurements inline; check any further change
+# with scripts/probe_memory.py, which scores a query against the active
+# setting's store and prints results regardless of min_score, rather than
+# reading /memory and debug/prompt_log.jsonl by hand.
+memory:
+  enabled: true
+  provider: openrouter
+  model: openai/text-embedding-3-small
+  top_k: 5
+  min_score: 0.30               # drop fragments below this raw cosine (before recency).
+                                # Provisional: measured 0.18 for unrelated Russian phrases,
+                                # 0.40 for related ones. Without it top_k always returns 5
+                                # fragments however weak the match. Tune via /memory scores.
+  query_window_messages: 0      # how many preceding messages join the incoming one in the
+                                # search query. Measured on real history: 0 is strictly
+                                # better than 4 — preceding lines flood the query vector
+                                # with the characters' own voice, which then matches every
+                                # archived line regardless of topic (rank of the correct
+                                # memory went 3->8 and 7->19 when widened to 4, and 26 of
+                                # 29 candidates cleared min_score instead of 6-16).
+  recall_cooldown_turns: 3      # don't recall a fragment again for this many turns.
+                                # Measured on the first beta: one topical cluster (the
+                                # "eared dog" motif) was winning and getting re-injected
+                                # into ~40% of turns. A cooldown of 3 drops the share of
+                                # the top-3 fragments from 27% to 18% without reducing
+                                # how much gets recalled overall; raising min_score
+                                # instead made concentration worse, not better.
+  recency_half_life_days: 30    # recency weight halves every this many days; 0 disables it
+  max_chars: 1500               # budget for the recalled-fragments block in the prompt
+  recalled_header: "Fragments from earlier in the exchange:"
+
+# Logging
+logging:
+  level: INFO

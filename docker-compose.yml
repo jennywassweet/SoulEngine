@@ -1,0 +1,12 @@
+services:
+  engine:
+    build: .
+    container_name: soulengine
+    env_file:
+      - .env
+    volumes:
+      - ./soul:/app/soul
+      - ./engine:/app/engine
+      - ./config:/app/config
+      - ./debug:/app/debug
+    restart: unless-stopped

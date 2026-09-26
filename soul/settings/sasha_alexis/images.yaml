@@ -1,0 +1,8 @@
+# All three camera positions. characters/alexis/face.jpeg is the identity
+# anchor (accepted 2026-09-20, cand_3 of 3 from scripts/make_face.py),
+# sent as a reference with every selfie and scene frame - shot never
+# carries one, her face isn't in frame there by definition.
+#
+# `shot` is the mode this setting is really built for: her own phone, her
+# point of view - a ghost sign on a barn wall, the light over the highway.
+modes: [shot, scene, selfie]
